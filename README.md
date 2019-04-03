@@ -1,3 +1,3 @@
-# Half-Life 3
+# Half-Half-Life 3
 
-FPS tech demo
+FPS tech demo on pico-8
