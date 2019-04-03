@@ -119,7 +119,9 @@ function _init()
 
  -- reset actors & engine
  actors={}
- add(actors,make_actor("cube",{5,0,6},65))		
+ for i=1,40 do
+	 add(actors,make_actor("cube",{rnd(10)-5,0,rnd(10)-5},rnd(360)))		
+	end
 end
 
 -- execute the given draw commands from a table
@@ -143,16 +145,19 @@ function _update()
   local dx,dz=0,0
   if(btn(0)) dx=-1
   if(btn(1)) dx=1
-  if(btn(2)) dz=-1
-  if(btn(3)) dz=1
+  if(btn(2)) dz=1
+  if(btn(3)) dz=-1
 
   if mousex then
-    plyr.hdg+=atan2(1,mx-mousex)
+   plyr.hdg+=(mx-mousex)/128
+  end
+  if mousey then
+   plyr.pitch+=(my-mousey)/128
   end
   
   local m=make_m_from_euler(0,plyr.hdg,0)
-  v_add(plyr.pos,m_fwd(m),dx)
-  v_add(plyr.pos,m_right(m),dz)
+  v_add(plyr.pos,m_right(m),0.1*dx)
+  v_add(plyr.pos,m_fwd(m),0.1*dz)
 
   cam:track(plyr.pos,make_m_from_euler(plyr.pitch,plyr.hdg,0))
 
@@ -160,7 +165,7 @@ function _update()
 end
 
 function _draw()
-    cls()
+    cls(4)
 	  draw_ground()
 	  zbuf_draw()
 
@@ -169,6 +174,7 @@ function _draw()
    local cpu=(flr(1000*stat(1))/10).."%"
    ?cpu,2,3,2
    ?cpu,2,2,7
+   
 end
 
 -->8
@@ -188,10 +194,11 @@ function sort(data)
  end
 end
 
-local clipplanes=json_parse'[[0,0,1,8],[0.707,0,-0.707,0.1767],[-0.707,0,-0.707,0.1767],[0,0.973,-0.228,0.243],[0,-0.973,-0.228,0.243],[0,0,-1,-0.25]]'
-local clipplanes_simple=json_parse'[[0,0,1,8],[0,0,-1,-0.25]]'
-
 -- zbuffer (kind of)
+local znear_plane={0,0,-1,-0.25}
+local k_center=1
+local k_right=2
+local k_left=4
 function zbuf_draw(zfar)
 	local objs={}
 
@@ -209,6 +216,9 @@ function zbuf_draw(zfar)
 			project_poly(d.v,d.c)
     end
  end
+ 
+ print(#objs,110,3,1)
+ print(#objs,110,2,7) 
 end
 
 function lerp(a,b,t)
@@ -313,53 +323,49 @@ function collect_drawables(model,m,pos,zfar,out)
   groups[f.gid]=0
  end
 
- -- model to
- local function v_cache(k)
-  local a=p[k]
-  if not a then
-    a=v_clone(model.v[k])
-    -- relative to world
-    m_x_v(m,a)
-    -- world to cam
-    v_add(a,cam.pos,-1)
-  		m_x_v(cam.m,a)
-
-	   p[k]=a
-  end
-  return a
- end
-
-	local clips
-	local function set_clips(a)		
-		local az=abs(a[3])
-		-- 5.33 to cover for aspect ratio on y-axis
-		if abs(a[1])>az or abs(5.33*a[2])>az then
-			-- full clipping
-			clips=clipplanes
-	 end
-	end
-
   -- faces
 	for i=1,#model.f do
   local f,n=model.f[i],model.n[i]
   -- front facing?
   if v_dot(n,cam_pos)>model.cp[i] then
-   -- reset clip planes
-	  clips=clipplanes_simple
    -- face vertices (for clipping)
-   local z,vertices=0,{}
+   local z,vertices,outcode,vizclip=0,{},0
    -- project vertices
    for k=1,#f.vi do
-			 local a=v_cache(f.vi[k])
-    z+=a[3]
-    -- select clip planes
-    set_clips(a)
+				local ak=f.vi[k]
+				local a=p[ak]
+				if not a then
+    	a=v_clone(model.v[ak])
+    	-- relative to world
+    	m_x_v(m,a)
+    	-- world to cam
+    	v_add(a,cam.pos,-1)
+  			m_x_v(cam.m,a)
+	   	p[ak]=a
+  		 -- outcode
+  		 -- 0: vizible
+  		 local outcode=0
+  		 local ax,ay,az=a[1],a[2],a[3]
+  		 if az>0.25 then
+  		 	if ax>az then outcode=k_right
+  		 	elseif -ax>az then outcode=k_left
+  		 	else outcode=k_center end
+  		 end
+  		 a.outcode=outcode
+  		end
+			 local az=a[3]
+    z+=az
+		  outcode=bor(outcode,a.outcode)
 		  vertices[#vertices+1]=a
    end
-   if f.c!=15 then -- collision hull?
-    vertices=plane_clip(zfar,clips,vertices)
+   --
+   if (outcode==6 or band(outcode,1)==1) and
+      f.c!=15 then -- collision hull?
+    vertices=z_poly_clip(0.25,vertices)
 	  	if(#vertices>2) add(out,{key=-64*#f.vi/z,v=vertices,c=f.c,kind=3})
- 	end
+ 	 end
+	  --print(outcode,2,12,13)
+	  --return
   else
    groups[f.gid]+=1
   end
@@ -375,17 +381,42 @@ end
 
 -- sutherland-hodgman clipping
 -- n.p is pre-multiplied in n[4]
-function plane_clip(zfar,clips,v)
-	for i=zfar and 1 or 2,#clips do
-  if(#v<2) break
-  v=plane_poly_clip(clips[i],v)
- end
-	return v
-end
 function plane_poly_clip(n,v)
 	local dist,allin={},0
 	for i,a in pairs(v) do
 		local d=n[4]-(a[1]*n[1]+a[2]*n[2]+a[3]*n[3])
+		if(d>0) allin+=1
+	 dist[i]=d
+	end
+ -- early exit
+	if(allin==#v) return v
+ if(allin==0) return {}
+
+	local res={}
+	local v0,d0,v1,d1,t,r=v[#v],dist[#v]
+ -- use local closure
+ local clip_line=function()
+ 	local r,t=make_v(v0,v1),d0/(d0-d1)
+ 	v_scale(r,t)
+ 	v_add(r,v0)
+ 	res[#res+1]=r
+ end
+	for i=1,#v do
+		v1,d1=v[i],dist[i]
+		if d1>0 then
+			if(d0<=0) clip_line()
+			res[#res+1]=v1
+		elseif d0>0 then
+   clip_line()
+		end
+		v0,d0=v1,d1
+	end
+	return res
+end
+function z_poly_clip(znear,v)
+	local dist,allin={},0
+	for i,a in pairs(v) do
+		local d=-znear+a[3]
 		if(d>0) allin+=1
 	 dist[i]=d
 	end
@@ -416,6 +447,7 @@ function plane_poly_clip(n,v)
 	end
 	return res
 end
+
 function make_actor(model,p,angle)
   angle=angle and angle/360 or 0
 	-- instance
@@ -451,7 +483,7 @@ function make_cam(x0,y0,focal)
 	return c
 end
 
-local sky_gradient={0,14,0,360,2,0,1440,1,0}
+local sky_gradient={0,0xc7,0xa5a5,360,0xc6,0xa5a5,1440,12,0}
 function draw_ground()
 	-- draw horizon
 	local zfar=-128
@@ -635,9 +667,9 @@ unpack_models()
 
 __gfx__
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00700700000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00077000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0000000000c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00700700006000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0007700000d000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00077000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00700700000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
