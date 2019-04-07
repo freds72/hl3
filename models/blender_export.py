@@ -152,7 +152,7 @@ model_scale = scene.get("scale", 1)
 s = s + "{:02x}".format(model_scale)
 
 # model lod selection
-lod_dist = scene.get("lod_dist", [1024])
+lod_dist = scene.get("lod_dist", [32])
 s = s + "{:02x}".format(len(lod_dist))
 for i in lod_dist:
     s = s + "{}".format(pack_double(i))
@@ -160,7 +160,7 @@ for i in lod_dist:
 # layers = lod
 ln = 0
 ls = ""
-for i in range(2):
+for i in range(3):
     layer_data = export_layer(model_scale,i)
     if len(layer_data)>0:
         ln += 1
