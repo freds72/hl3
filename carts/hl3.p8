@@ -803,10 +803,10 @@ function trapezefill(l,dl,r,dr,start,finish)
   -- cloud texture location + cam pos
   local cx,cz=-cam.pos[1],cam.pos[3]
 	-- rasterization
-	for j=start,min(finish,127) do
+	for j=start,min(finish,127),2 do
 		local len=l[5]-l[1]
 		if len>0 then
-  local w0,u0,v0=l[2],l[3],l[4]
+  	local w0,u0,v0=l[2],l[3],l[4]
    -- render every 4 pixels
 			local dw,du,dv=shl(l[6]-w0,2)/len,shl(l[7]-u0,2)/len,shl(l[8]-v0,2)/len
    for i=l[1],l[5],4 do
@@ -826,7 +826,7 @@ function trapezefill(l,dl,r,dr,start,finish)
 		 end
   end
 		for k,v in pairs(dl) do
-			l[k]+=v
+			l[k]+=2*v
 		end
 	end
 end
