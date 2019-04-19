@@ -159,6 +159,7 @@ local plyr={
 }
 local mousex,mousey
 function _update()
+	-- input
 	local mx,my=stat(32),stat(33)
 
   local dx,dz=0,0
@@ -184,6 +185,14 @@ function _update()
 
   cam:track(plyr.pos,make_m_from_euler(plyr.pitch,plyr.hdg,0,'yxz'))
 
+	-- update actors
+	-- todo: fix missed updates
+	for _,a in pairs(actors) do
+		if a.update then
+			if(not a:update()) del(actors,a)
+		end
+	end
+
   mousex,mousey=mx,my
 end
 
@@ -207,6 +216,26 @@ end
 
 -->8
 -- 3d engine @freds72
+
+function clone(src,dst)
+	-- safety checks
+	if(src==dst) assert()
+	if(type(src)!="table") assert()
+	dst=dst or {}
+	for k,v in pairs(src) do
+		if(not dst[k]) dst[k]=v
+	end
+	-- randomize selected values
+	if src.rnd then
+		for k,v in pairs(src.rnd) do
+			-- don't overwrite values
+			if not dst[k] then
+				dst[k]=v[3] and rndarray(v) or rndlerp(v[1],v[2])
+			end
+		end
+	end
+	return dst
+end
 
 -- https://github.com/morgan3d/misc/tree/master/p8sort
 function sort(data)
@@ -266,11 +295,11 @@ local znear_plane={0,0,-1,-0.25}
 local k_center=1
 local k_right=2
 local k_left=4
-function zbuf_draw(zfar)
+function zbuf_draw()
 	local objs={}
 
 	for _,d in pairs(actors) do
-		collect_drawables(d.model,d.m,d.pos,zfar,objs)
+		collect_drawables(d.model,d.m,d.pos,objs)
 	end
 
 	-- z-sorting
@@ -372,7 +401,7 @@ function m_fwd(m)
 	return {m[9],m[10],m[11]}
 end
 
-function collect_drawables(model,m,pos,zfar,out)
+function collect_drawables(model,m,pos,out)
  -- vertex cache
  local p={}
 
@@ -538,6 +567,18 @@ function make_actor(model,p,m)
 	-- init position
   m_set_pos(a.m,p)
 	return a
+end
+
+function make_bullet(a,p,v)
+	local b=clone(a,{
+		pos=v_clone(p),
+		v=v_clone(v),
+		collect_drawables=function(self,out)
+			local x,y,w=cam:project(self.pos)
+			if(w>0) add(out,{key=-w,kind=1,x=x,y=y,c=7,r=max(0.5,0.5*w)})
+		end
+	})
+	return add(actors, b)
 end
 
 function make_cam(x0,y0,focal)
