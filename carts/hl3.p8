@@ -160,8 +160,9 @@ function _update()
    end
   end
   if mousey then
-   plyr.pitch+=(my-mousey)/128
-  end
+	  plyr.pitch+=(my-mousey)/128
+			plyr.pitch=mid(plyr.pitch,-0.25,0.25)
+	 end
   
   local m=make_m_from_euler(0,plyr.hdg,0)
   v_add(plyr.pos,m_right(m),0.1*dx)
@@ -183,15 +184,34 @@ function _draw()
 			palt()
 			
    -- perf monitor!
-   --[[
+   --
    local cpu=(flr(1000*stat(1))/10).."%"
    ?"∧"..cpu,2,3,2
    ?"∧"..cpu,2,2,7
-   ]]
-end
+   
+end 
 
 -->8
 -- 3d engine @freds72
+function clone(src,dst)
+	-- safety checks
+	if(src==dst) assert()
+	if(type(src)!="table") assert()
+	dst=dst or {}
+	for k,v in pairs(src) do
+		if(not dst[k]) dst[k]=v
+	end
+	-- randomize selected values
+	if src.rnd then
+		for k,v in pairs(src.rnd) do
+			-- don't overwrite values
+			if not dst[k] then
+				dst[k]=v[3] and rndarray(v) or rndlerp(v[1],v[2])
+			end
+		end
+	end
+	return dst
+end
 
 -- https://github.com/morgan3d/misc/tree/master/p8sort
 function sort(data)
@@ -610,8 +630,31 @@ function draw_ground()
 	 cloudplane=plane_poly_clip(clipplanes[i],cloudplane)
  end
  color(0x40)
+ -- backup shadow map
+ local src,dst=0x0,0x4300
+ for i=0,63 do
+ 	memcpy(dst,src,32)
+ 	src+=64
+  dst+=64
+ end
+ for i=-0.75,0.75 do
+  for j=-0.75,0.75 do
+  	local x,y=32+flr(cam.pos[1])+i,32-flr(cam.pos[3]+1)+j
+			if band(bor(x,y),0xff80)==0 then
+				local c=sget(x,y)
+				sset(x,y,min(c+15-15*(i*i+j*j)/4,15))
+			end
+		end
+	end
  project_texpoly(cloudplane)
-
+ -- restore shadow map
+ dst,src=0x0,0x4300
+ for i=0,63 do
+ 	memcpy(dst,src,32)
+ 	src+=64
+  dst+=64
+ end
+ 
  -- sun
  local sun={-5,5,-5}
  m_x_v(cam.m,sun)
