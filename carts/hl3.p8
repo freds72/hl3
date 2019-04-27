@@ -143,9 +143,10 @@ local plyr={
   pitch=0
 }
 local mousex,mousey
+local mouselb=false
 function _update()
 	-- input
-	local mx,my=stat(32),stat(33)
+	local mx,my,lmb=stat(32),stat(33),stat(34)==1
 
   local dx,dz=0,0
   if(btn(0) or btn(0,1)) dx=-1
@@ -170,6 +171,16 @@ function _update()
   v_add(plyr.pos,m_fwd(m),0.1*dz)
 
   cam:track(plyr.pos,make_m_from_euler(plyr.pitch,plyr.hdg,0,'yxz'))
+	
+	if mouselb==true and mouselb!=lmb then
+	 m=cam.m
+	 local v=cam:unproject(mousex,mousey)
+	 v_normz(v)
+	 --local v={m[3],m[7],m[11]}
+	 local p=v_clone(plyr.pos)
+	 v_add(p,v,0.5)
+		make_bullet(p,v)
+	end
 
 	-- update actors
 	-- todo: fix missed updates
@@ -180,12 +191,15 @@ function _update()
 	end
 
   mousex,mousey=mx,my
+	mouselb=lmb
 end
 
 function _draw()
    cls(4)
+   
 	  draw_ground()
 	  zbuf_draw()
+	  
 
 			palt(0,false)
 			palt(11,true)
@@ -202,26 +216,6 @@ end
 
 -->8
 -- 3d engine @freds72
-function clone(src,dst)
-	-- safety checks
-	if(src==dst) assert()
-	if(type(src)!="table") assert()
-	dst=dst or {}
-	for k,v in pairs(src) do
-		if(not dst[k]) dst[k]=v
-	end
-	-- randomize selected values
-	if src.rnd then
-		for k,v in pairs(src.rnd) do
-			-- don't overwrite values
-			if not dst[k] then
-				dst[k]=v[3] and rndarray(v) or rndlerp(v[1],v[2])
-			end
-		end
-	end
-	return dst
-end
-
 function clone(src,dst)
 	-- safety checks
 	if(src==dst) assert()
@@ -297,6 +291,7 @@ end
 
 -- zbuffer (kind of)
 local znear_plane={0,0,-1,-0.25}
+-- bbox clipping outcodes
 local k_center=1
 local k_right=2
 local k_left=4
@@ -304,7 +299,7 @@ function zbuf_draw()
 	local objs={}
 
 	for _,d in pairs(actors) do
-		collect_drawables(d.model,d.m,d.pos,objs)
+		d:collect_drawables(objs)
 	end
 
 	-- z-sorting
@@ -314,9 +309,12 @@ function zbuf_draw()
 	for i=1,#objs do
 		local d=objs[i]
    if d.kind==3 then
-    fillp(d.fp)
+    	fillp(d.fp)
 		 	project_poly(d.v,d.c)
-   end
+			fillp()
+   elseif d.kind==1 then
+	 	circfill(d.x,d.y,d.r,d.c)
+	 end
  end
  fillp()
  
@@ -345,6 +343,17 @@ function v_scale(v,scale)
 	v[2]*=scale
 	v[3]*=scale
 end
+function v_normz(v)
+	local d=v_dot(v,v)
+	if d>0.001 then
+		d=d^.5
+		v[1]/=d
+		v[2]/=d
+		v[3]/=d
+	end
+	return d
+end
+
 function v_add(v,dv,scale)
 	scale=scale or 1
 	v[1]+=scale*dv[1]
@@ -412,6 +421,7 @@ function m_fwd(m)
 	return {m[9],m[10],m[11]}
 end
 
+-- default function for 3d-model based actors
 function collect_drawables(model,m,pos,out)
  -- vertex cache
  local p={}
@@ -575,11 +585,14 @@ end
 
 function make_actor(model,p,m)
   angle=angle and angle/360 or 0
+  model=all_models[model]
 	-- instance
 	local a={
 		pos=v_clone(p),
-    model=all_models[model],
-		m=m
+		m=m,
+		collect_drawables=function(self,out)
+			collect_drawables(model,self.m,self.pos,out)
+		end
   }
 
 	-- init position
@@ -587,15 +600,28 @@ function make_actor(model,p,m)
 	return a
 end
 
-function make_bullet(a,p,v)
-	local b=clone(a,{
-		pos=v_clone(p),
+function make_bullet(p,v)
+	local t=60+rnd(5)
+	local b={
+		is_shaded=true,
+		pos=v_clone(p),		
 		v=v_clone(v),
+		update=function(self)
+			t-=1
+			if(t<0) return
+			v_add(self.pos,self.v,0.3)
+			if(self.pos[2]<0) return
+			return true
+		end,
 		collect_drawables=function(self,out)
-			local x,y,w=cam:project(self.pos)
-			if(w>0) add(out,{key=-w,kind=1,x=x,y=y,c=7,r=max(0.5,0.5*w)})
+	 	local p=v_clone(self.pos)	 	
+	 	v_add(p,cam.pos,-1)
+ 		m_x_v(cam.m,p)
+
+			local x,y,w=cam:project2d(p)
+			if(w>0) add(out,{key=w,kind=1,x=x,y=y,c=7,r=max(0.5,0.5*w)})
 		end
-	})
+	}
 	return add(actors, b)
 end
 
@@ -608,6 +634,13 @@ function make_cam(x0,y0,focal)
 		-- inverse view matrix
     self.m=m
     m_inv(self.m)
+	 end,
+	 -- 
+	 unproject=function(self,sx,sy)
+   local m=self.m
+		 local x,y,z=0.25*(sx-64)/focal,0.25*(64-sy)/focal,0.25
+		 -- to world
+			return {m[1]*x+m[2]*y+m[3]*z,m[5]*x+m[6]*y+m[7]*z,m[9]*x+m[10]*y+m[11]*z}
 	 end,
 		-- project cam-space points into 2d
     project2d=function(self,v)
@@ -678,15 +711,18 @@ function draw_ground()
  	src+=64
   dst+=64
  end
- for i=-0.75,0.75 do
-  for j=-0.75,0.75 do
-  	local x,y=32+flr(cam.pos[1])+i,32-flr(cam.pos[3]+1)+j
-			if band(bor(x,y),0xff80)==0 then
-				local c=sget(x,y)
-				sset(x,y,min(c+15-15*(i*i+j*j)/4,15))
+ -- draw shaded actors
+ for _,a in pairs(actors) do
+ 	if a.is_shaded then
+ 		local y=a.pos[2]
+  	local x,z=32+a.pos[1]+y,32-(a.pos[3]+y)
+			if band(bor(x,z),0xff80)==0 then
+				local c=sget(x,z)
+				sset(x,z,mid(c+15-15*y*y/32,0,15))
 			end
-		end
-	end
+ 	end
+ end
+ 
  project_texpoly(cloudplane)
  -- restore shadow map
  dst,src=0x0,0x4300
