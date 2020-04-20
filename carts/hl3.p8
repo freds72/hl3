@@ -119,7 +119,7 @@ function _init()
 	poke(0x5f2d,1)
 
  -- 3d
- cam=make_cam(64,64,64)
+ cam=make_cam(63.5,63.5,63.5)
 
  -- reset actors & engine
  actors={}
@@ -478,32 +478,31 @@ function collect_drawables(model,m,pos,out)
    -- face vertices (for clipping)
    local z,vertices=0,{}
    -- project vertices
-   for k=1,#f.vi do
-				local ak=f.vi[k]
-				local a=p[ak]
-				if not a then
-    	a=v_clone(model.v[ak])
-    	-- relative to world
-    	m_x_v(m,a)
-    	-- world to cam
-    	v_add(a,cam.pos,-1)
+   for vi,ak in pairs(f.vi) do
+		local a=p[ak]
+		if not a then
+	    	a=v_clone(model.v[ak])
+    		-- relative to world
+    		m_x_v(m,a)
+    		-- world to cam
+    		v_add(a,cam.pos,-1)
   			m_x_v(cam.m,a)
-	   	p[ak]=a  		 
+	   		p[ak]=a  		 
   		end
-			 local az=a[3]
-    z+=az
-		  vertices[#vertices+1]=a
-   end
+		local az=a[3]
+    	z+=az
+		vertices[vi]=a
+	end
    --
    if f.c!=15 then -- collision hull?
-    vertices=z_poly_clip(0.25,vertices)
+    	vertices=z_poly_clip(0.25,vertices)
 	  	if #vertices>2 then
-   		local c=max(5*v_dot(n,light))
-   		-- get floating part
-   		local cf=(#dither_pat-1)*(1-c%1)
-   		c=bor(shl(sget(64+min(c+1,5),f.c),4),sget(64+c,f.c))
+   			local c=max(5*v_dot(n,light))
+   			-- get floating part
+   			local cf=(#dither_pat-1)*(1-c%1)
+   			c=bor(shl(sget(64+min(c+1,5),f.c),4),sget(64+c,f.c))
 
-	  	 add(out,{key=64*#f.vi/z,v=vertices,c=c,fp=dither_pat[flr(cf)+1],kind=3})
+	  	 	add(out,{key=64*#f.vi/z,v=vertices,c=c,fp=dither_pat[flr(cf)+1],kind=3})
 	  	end
  	 end
 	  --print(outcode,2,12,13)
@@ -653,7 +652,7 @@ function make_cam(x0,y0,focal)
     project2da=function(self,v)
   	  -- view to screen
   	  local w=focal/v[3]
-  	  return {x0+v[1]*w,y0-v[2]*w,w,v[4]*w,v[5]*w}
+  	  return {x0+ceil(v[1]*w),y0-ceil(v[2]*w),w,v[4]*w,v[5]*w}
 		end
 	}
 	return c
@@ -740,56 +739,36 @@ function draw_ground()
 end
 
 function project_poly(p,c)
-	if #p>2 then
-		local x0,y0=cam:project2d(p[1])
-  local x1,y1=cam:project2d(p[2])
-		for i=3,#p do
-			local x2,y2=cam:project2d(p[i])
-			trifill(x0,y0,x1,y1,x2,y2,c)
-		  x1,y1=x2,y2
+	if(#p<3) return
+	color(c)
+	local p0,nodes=p[#p],{}
+	-- band vs. flr: -0.20%
+	local x0,y0=cam:project2d(p0)
+
+	for i=1,#p do
+		local p1=p[i]
+		local x1,y1=cam:project2d(p1)
+		-- backup before any swap
+		local _x1,_y1=x1,y1
+		if(y0>y1) x0,y0,x1,y1=x1,y1,x0,y0
+		-- exact slope
+		local dx=(x1-x0)/(y1-y0)
+		if(y0<0) x0-=y0*dx y0=0
+		-- subpixel shifting (after clipping)
+		local cy0=ceil(y0)
+		x0+=(cy0-y0)*dx
+		for y=cy0,min(ceil(y1)-1,127) do
+			local x=nodes[y]
+			if x then
+				rectfill(x,y,x0,y)
+			else
+				nodes[y]=x0
+			end
+			x0+=dx
 		end
-	end
-end
-
--->8
--- trifill
--- by @p01
-function p01_trapeze_h(l,r,lt,rt,y0,y1)
-  lt,rt=(lt-l)/(y1-y0),(rt-r)/(y1-y0)
-  if(y0<0)l,r,y0=l-y0*lt,r-y0*rt,0
-   for y0=y0,min(y1,128) do
-   rectfill(l,y0,r,y0)
-   l+=lt
-   r+=rt
-  end
-end
-function p01_trapeze_w(t,b,tt,bt,x0,x1)
- tt,bt=(tt-t)/(x1-x0),(bt-b)/(x1-x0)
- if(x0<0)t,b,x0=t-x0*tt,b-x0*bt,0
- for x0=x0,min(x1,128) do
-  rectfill(x0,t,x0,b)
-  t+=tt
-  b+=bt
- end
-end
-
-function trifill(x0,y0,x1,y1,x2,y2,col)
- color(col)
- if(y1<y0)x0,x1,y0,y1=x1,x0,y1,y0
- if(y2<y0)x0,x2,y0,y2=x2,x0,y2,y0
- if(y2<y1)x1,x2,y1,y2=x2,x1,y2,y1
- if max(x2,max(x1,x0))-min(x2,min(x1,x0)) > y2-y0 then
-  col=x0+(x2-x0)/(y2-y0)*(y1-y0)
-  p01_trapeze_h(x0,x0,x1,col,y0,y1)
-  p01_trapeze_h(x1,col,x2,x2,y1,y2)
- else
-  if(x1<x0)x0,x1,y0,y1=x1,x0,y1,y0
-  if(x2<x0)x0,x2,y0,y2=x2,x0,y2,y0
-  if(x2<x1)x1,x2,y1,y2=x2,x1,y2,y1
-  col=y0+(y2-y0)/(x2-x0)*(x1-x0)
-  p01_trapeze_w(y0,y0,y1,col,x0,x1)
-  p01_trapeze_w(y1,col,y2,y2,x1,x2)
- end
+		-- next vertex
+		x0,y0=_x1,_y1
+	end	
 end
 
 -->8
@@ -948,7 +927,7 @@ function trapezefill(l,dl,r,dr,start,finish)
 
   -- cloud texture location + cam pos
   local cx,cz=-cam.pos[1],cam.pos[3]
-	-- rasterization
+		-- rasterization
 	for j=start,min(finish,127),2 do
 		local len=l[5]-l[1]
 		if len>0 then
